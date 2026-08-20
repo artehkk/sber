@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сбер NFC Терминал</title>
+    <style>
+        body { font-family: sans-serif; background: #1e1e1e; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .terminal { background: #2a2a2a; border-radius: 30px; padding: 30px; width: 400px; color: white; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .logo { font-size: 24px; font-weight: bold; color: #21a038; }
+        .amount { font-size: 48px; font-weight: bold; margin: 20px 0; }
+        .status-box { background: #1e1e1e; border-radius: 15px; padding: 20px; border: 2px dashed #444; margin: 20px 0; }
+        .status-label { color: #888; font-size: 14px; }
+        .status-value { font-size: 22px; font-weight: bold; margin-top: 5px; color: #fff; }
+        .status-value.success { color: #21a038; }
+        .status-value.error { color: #ff3b30; }
+        .btn { padding: 15px 30px; border: none; border-radius: 15px; font-size: 18px; cursor: pointer; background: #21a038; color: white; width: 100%; margin-top: 10px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .small-btn { background: #555; font-size: 14px; padding: 8px 15px; width: auto; margin-top: 5px; }
+    </style>
+</head>
+<body>
+<div class="terminal">
+    <div class="logo">СБЕР • ТЕРМИНАЛ</div>
+    <div class="amount" id="amountDisplay">0 ₽</div>
+    
+    <div class="status-box" id="nfcStatus">
+        <div class="status-label">ДАННЫЕ КАРТЫ (NFC)</div>
+        <div class="status-value" id="nfcValue">⏳ Ожидание...</div>
+    </div>
+
+    <button class="btn" id="payBtn" disabled>💳 ОПЛАТИТЬ (NFC)</button>
+    <button class="btn small-btn" id="resetBtn">🔄 Сброс кассы</button>
+    <div style="margin-top:10px; font-size:12px; color:#666;">Связь с Python-кассой: <span id="connStatus">ожидание</span></div>
+</div>
+
+<script>
+    // Эмуляция NFC метки
+    let nfcCardData = "pay card"; 
+    let currentAmount = 0;
+    let isWaitingForPayment = false;
+    let paymentCallback = null;
+
+    const amountDisplay = document.getElementById('amountDisplay');
+    const nfcValue = document.getElementById('nfcValue');
+    const nfcStatus = document.getElementById('nfcStatus');
+    const payBtn = document.getElementById('payBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const connStatus = document.getElementById('connStatus');
+
+    // Обработка запроса от Python (через URL параметры или fetch)
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'start_payment') {
+            connStatus.textContent = 'активна';
+            currentAmount = event.data.amount;
+            amountDisplay.textContent = currentAmount + ' ₽';
+            nfcValue.textContent = '📡 Поднесите карту...';
+            nfcValue.className = 'status-value';
+            payBtn.disabled = false;
+            isWaitingForPayment = true;
+            
+            // Сохраняем функцию колбэка для возврата ответа
+            paymentCallback = event.data.callback;
+        }
+    });
+
+    // Кнопка оплаты (кассир или клиент нажимает на планшете)
+    payBtn.addEventListener('click', function() {
+        if (currentAmount === 0 || !isWaitingForPayment) return;
+        
+        nfcValue.textContent = '📡 Чтение метки...';
+        payBtn.disabled = true;
+
+        // Эмуляция задержки NFC
+        setTimeout(() => {
+            if (nfcCardData === "pay card") {
+                nfcValue.textContent = '✅ PAY CARD';
+                nfcValue.className = 'status-value success';
+                nfcStatus.style.borderColor = '#21a038';
+                
+                // Успешный ответ Python-кассе
+                if (paymentCallback) {
+                    paymentCallback({ status: 'success', amount: currentAmount });
+                }
+                alert("✅ Оплата принята! Чек сформирован.");
+                isWaitingForPayment = false;
+                payBtn.disabled = true;
+            } else {
+                nfcValue.textContent = `❌ ОШИБКА (${nfcCardData})`;
+                nfcValue.className = 'status-value error';
+                nfcStatus.style.borderColor = '#ff3b30';
+                
+                if (paymentCallback) {
+                    paymentCallback({ status: 'error', reason: 'No pay card found' });
+                }
+                alert("⛔ Отказ! В карте нет 'pay card'.");
+                isWaitingForPayment = false;
+                payBtn.disabled = true;
+            }
+        }, 2000);
+    });
+
+    resetBtn.addEventListener('click', function() {
+        currentAmount = 0;
+        amountDisplay.textContent = '0 ₽';
+        nfcValue.textContent = '⏳ Ожидание...';
+        nfcValue.className = 'status-value';
+        nfcStatus.style.borderColor = '#444';
+        payBtn.disabled = true;
+        isWaitingForPayment = false;
+        connStatus.textContent = 'ожидание';
+    });
+
+    // Эмуляция получения команды от Python через HTTP (для простоты теста)
+    // В реальности ты будешь отправлять POST запросы на этот URL
+    async function checkForPayment() {
+        try {
+            const response = await fetch('/api/check_payment', { method: 'GET' });
+            const data = await response.json();
+            if (data && data.amount) {
+                // Запуск оплаты
+                currentAmount = data.amount;
+                amountDisplay.textContent = currentAmount + ' ₽';
+                nfcValue.textContent = '📡 Поднесите карту...';
+                payBtn.disabled = false;
+                isWaitingForPayment = true;
+            }
+        } catch (e) {}
+    }
+    // Периодическая проверка (для демо)
+    setInterval(checkForPayment, 3000);
+</script>
+</body>
+</html>
